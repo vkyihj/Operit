@@ -1,54 +1,45 @@
-# 给这个工作流起个名字
+# 工作流名称
 name: Android APK Build
 
-# 定义触发条件：当向 main 或 master 分支推送代码时触发
+# 触发条件：推送到 main 或 master 分支，或手动触发
 on:
   push:
     branches: [ main, master ]
-  # 也支持手动触发
   workflow_dispatch:
 
 jobs:
   build:
-    # 运行环境：使用最新的 Ubuntu
+    # 运行在最新的 Ubuntu 环境
     runs-on: ubuntu-latest
 
     steps:
-    # 1. 拉取你的仓库代码
-    - name: Checkout code
-      uses: actions/checkout@v4
+      # 1. 拉取代码：升级到 v5，支持 Node.js 24
+      - name: Checkout code
+        uses: actions/checkout@v5
 
-    # 2. 设置 Java 环境 (Gradle 需要)
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'temurin'
-        java-version: '17'
+      # 2. 设置 Java 环境：升级到 v5，支持 Node.js 24
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
-    # 3. 设置 Android SDK 环境
-    - name: Set up Android SDK
-      uses: android-actions/setup-android@v3
+      # 3. 设置 Android SDK：保持 v3（目前最新），仍可正常工作
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-    # 4. 授权 Gradle 执行文件 (如果存在)
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
+      # 4. 赋予 gradlew 执行权限（如果项目中有该文件）
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
 
-    # 5. 【关键步骤】编译并指定 ABI
-    #    在 gradle 命令中通过 -Pandroid.injected.build.abi 传入参数，
-    #    这会覆盖 build.gradle 中的默认配置，确保只生成 armeabi-v7a 的 APK。
-    - name: Build APK (armeabi-v7a only)
-      run: |
-        ./gradlew assembleDebug -Pandroid.injected.build.abi=armeabi-v7a
-      # 如需编译发布版，将 assembleDebug 替换为 assembleRelease
-      # 但 Release 版需要处理签名，详见下文“进阶：编译签名 Release 版”
+      # 5. 【核心】编译仅包含 armeabi-v7a 的 Debug 版 APK
+      - name: Build APK (armeabi-v7a only)
+        run: |
+          ./gradlew assembleDebug -Pandroid.injected.build.abi=armeabi-v7a
 
-    # 6. 上传 APK 作为构建产物 (Artifact)
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        # 产物的名字，可以自定义
-        name: app-armeabi-v7a-debug
-        # APK 文件生成的位置
-        path: app/build/outputs/apk/debug/*.apk
-        # 如果你想上传 release 版的 APK，请将路径改为:
-        # path: app/build/outputs/apk/release/*.apk
+      # 6. 上传编译产物
+      - name: Upload APK
+        uses: actions/upload-artifact@v4   # v4 仍受支持，无需升级
+        with:
+          name: app-armeabi-v7a-debug
+          path: app/build/outputs/apk/debug/*.apk
