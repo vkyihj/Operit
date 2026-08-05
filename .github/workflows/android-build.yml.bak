@@ -1,0 +1,108 @@
+name: Android APK Build (Auto-Fix)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 拉取代码（已升级至 v5）
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      # 2. 设置 Java 17（已升级至 v5）
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # 3. 设置 Android SDK（已升级至 v4，支持 Node.js 24）
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      # ============ 自动修复项目源码（关键步骤）============
+      - name: Auto-fix build.gradle files
+        run: |
+          # 3.1 修复 app/build.gradle：添加 ndk.abiFilters，并注释掉 terminal 依赖
+          if [ -f "app/build.gradle" ]; then
+            # 备份原文件
+            cp app/build.gradle app/build.gradle.bak
+
+            # 在 defaultConfig 块中插入 ndk { abiFilters 'armeabi-v7a', 'arm64-v8a' }
+            # 如果已经存在 ndk 块，则跳过（避免重复）
+            if ! grep -q "ndk {" app/build.gradle; then
+              sed -i '/defaultConfig {/a \        ndk {\n            abiFilters "armeabi-v7a", "arm64-v8a"\n        }' app/build.gradle
+            fi
+
+            # 注释掉任何 implementation project(':terminal')
+            sed -i 's/^\(\s*implementation project(:terminal\))/\/\/ \1/' app/build.gradle
+          fi
+
+          # 3.2 如果 terminal 模块存在，则确保其 build.gradle 是一个合法的 Android 库
+          if [ -d "terminal" ] && [ -f "terminal/build.gradle" ]; then
+            cp terminal/build.gradle terminal/build.gradle.bak
+            # 确保有 android 块和 buildTypes
+            if ! grep -q "android {" terminal/build.gradle; then
+              # 如果文件不完整，直接覆盖为合法库配置（谨慎操作）
+              cat > terminal/build.gradle << 'EOF'
+            plugins {
+                id 'com.android.library'
+            }
+            android {
+                compileSdk 34
+                defaultConfig {
+                    minSdk 21
+                    targetSdk 34
+                    ndk {
+                        abiFilters 'armeabi-v7a', 'arm64-v8a'
+                    }
+                }
+                buildTypes {
+                    debug {}
+                    release {}
+                }
+                compileOptions {
+                    sourceCompatibility JavaVersion.VERSION_17
+                    targetCompatibility JavaVersion.VERSION_17
+                }
+            }
+            dependencies {
+            }
+EOF
+            else
+              # 若存在 android 块，则只添加 abiFilters（如果缺失）
+              if ! grep -q "abiFilters" terminal/build.gradle; then
+                sed -i '/defaultConfig {/a \            ndk {\n                abiFilters "armeabi-v7a", "arm64-v8a"\n            }' terminal/build.gradle
+              fi
+            fi
+          fi
+
+          # 3.3 如果 settings.gradle 中没有 include ':terminal'，则添加（确保模块被识别）
+          if [ -f "settings.gradle" ]; then
+            if ! grep -q "include.*:terminal" settings.gradle; then
+              echo "include ':terminal'" >> settings.gradle
+            fi
+          fi
+
+          echo "✅ 源码自动修复完成"
+
+      # 4. 授权 gradlew
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # 5. 编译（指定 ABI）
+      - name: Build APK (armeabi-v7a only)
+        run: |
+          ./gradlew assembleDebug -Pandroid.injected.build.abi=armeabi-v7a
+
+      # 6. 上传产物
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-armeabi-v7a-debug
+          path: app/build/outputs/apk/debug/*.apk
